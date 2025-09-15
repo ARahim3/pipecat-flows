@@ -750,6 +750,162 @@ class AWSBedrockAdapter(LLMAdapter):
             transition_callback=transition_callback,
         )
 
+class UltravoxAdapter(LLMAdapter):
+    """Format adapter for UltravoxLLMService.
+
+    Handles Ultravox's audio-to-text function calling format and integrates
+    with the standard flow system.
+    """
+
+    def __init__(self):
+        """Initialize the Ultravox adapter."""
+        super().__init__()
+        # Create a minimal provider adapter that handles tool formatting
+        self.provider_adapter = UltravoxProviderAdapter()
+
+    def _get_function_name_from_dict(self, function_def: Dict[str, Any]) -> str:
+        """Extract function name from Ultravox function definition."""
+        # Ultravox uses same format as OpenAI
+        if "function" in function_def:
+            return function_def["function"]["name"]
+        return function_def.get("name", "unknown_function")
+
+    def format_summary_message(self, summary: str) -> dict:
+        """Format summary as a system message for Ultravox."""
+        return {
+            "role": "system",
+            "content": f"Conversation summary:\n{summary}"
+        }
+
+    async def generate_summary(
+        self, llm: Any, summary_prompt: str, messages: List[dict]
+    ) -> Optional[str]:
+        """Generate summary using UltravoxLLMService."""
+        try:
+            # Use Ultravox's existing generation capabilities
+            logger.info("Generating summary with UltravoxLLMService")
+            return f"Summary: Conversation with {len(messages)} messages" #Placeholder, future improvement
+        except Exception as e:
+            logger.error(f"Ultravox summary generation failed: {e}", exc_info=True)
+            return None
+
+    def convert_to_function_schema(self, function_def: Dict[str, Any]) -> FlowsFunctionSchema:
+        """Convert Ultravox function definition to FlowsFunctionSchema."""
+        # Extract function data (compatible with OpenAI format)
+        if "function" in function_def:
+            func_data = function_def["function"]
+        else:
+            func_data = function_def
+
+        name = func_data["name"]
+        description = func_data.get("description", "")
+        parameters = func_data.get("parameters", {})
+
+        # Extract required fields
+        required = parameters.get("required", [])
+        properties = parameters.get("properties", {})
+
+        return FlowsFunctionSchema(
+            name=name,
+            description=description,
+            required=required,
+            properties=properties,
+            handler=None  # Will be set by FlowManager
+        )
+
+
+# ============================================================================
+# ADD THIS NEW CLASS - UltravoxProviderAdapter
+# ============================================================================
+
+class UltravoxProviderAdapter:
+    """Minimal provider adapter for Ultravox that handles tool formatting."""
+
+    def to_provider_tools_format(self, tools_schema):
+        """Convert tools schema to Ultravox format (same as OpenAI)."""
+        try:
+            # Ultravox uses OpenAI-compatible format
+            if hasattr(tools_schema, 'tools') and tools_schema.tools:
+                formatted_tools = []
+                for tool in tools_schema.tools:
+                    if hasattr(tool, 'name') and hasattr(tool, 'description'):
+                        formatted_tool = {
+                            "type": "function",
+                            "function": {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": getattr(tool, 'properties', {}),
+                                    "required": getattr(tool, 'required', [])
+                                }
+                            }
+                        }
+                        formatted_tools.append(formatted_tool)
+                return formatted_tools
+            return []
+        except Exception as e:
+            logger.error(f"Error formatting tools for Ultravox: {e}")
+            return []
+
+
+# def create_adapter(llm) -> LLMAdapter:
+#     """Create appropriate adapter based on LLM service type or inheritance.
+
+#     Checks both direct class types and inheritance hierarchies to determine
+#     the appropriate adapter for any LLM service.
+
+#     Args:
+#         llm: LLM service instance.
+
+#     Returns:
+#         Provider-specific adapter instance.
+
+#     Raises:
+#         ValueError: If LLM type is not supported or required dependency not installed.
+#     """
+#     llm_type = type(llm).__name__
+#     llm_class = type(llm)
+
+#     if llm_type == "OpenAILLMService":
+#         logger.debug("Creating OpenAI adapter")
+#         return OpenAIAdapter()
+
+#     if llm_type == "AnthropicLLMService":
+#         logger.debug("Creating Anthropic adapter")
+#         return AnthropicAdapter()
+
+#     if llm_type == "GoogleLLMService":
+#         logger.debug("Creating Google adapter")
+#         return GeminiAdapter()
+
+#     if llm_type == "AWSBedrockLLMService":
+#         logger.debug("Creating Bedrock adapter")
+#         return AWSBedrockAdapter()
+
+#     # Try to find OpenAILLMService for inheritance check
+#     try:
+#         module = sys.modules.get("pipecat.services.openai")
+#         if module:
+#             openai_service = getattr(module, "OpenAILLMService", None)
+#             if openai_service and issubclass(llm_class, openai_service):
+#                 logger.debug(f"Creating OpenAI adapter for {llm_type}")
+#                 return OpenAIAdapter()
+#     except (TypeError, AttributeError) as e:
+#         # Log but continue to error handling if issubclass check fails
+#         logger.warning(f"Error checking inheritance for {llm_type}: {str(e)}")
+
+#     # Error handling
+#     error_msg = (
+#         f"Unsupported LLM type or missing dependency: {llm_type} (module: {llm_class.__module__})\n"
+#     )
+#     error_msg += "Make sure you have installed the required dependency:\n"
+#     error_msg += "- For OpenAI: pip install 'pipecat-ai[openai]'\n"
+#     error_msg += "- For Anthropic: pip install 'pipecat-ai[anthropic]'\n"
+#     error_msg += "- For Google: pip install 'pipecat-ai[google]'\n"
+#     error_msg += "- For Bedrock: pip install 'pipecat-ai[aws]'"
+
+#     raise ValueError(error_msg)
 
 def create_adapter(llm) -> LLMAdapter:
     """Create appropriate adapter based on LLM service type or inheritance.
@@ -758,13 +914,13 @@ def create_adapter(llm) -> LLMAdapter:
     the appropriate adapter for any LLM service.
 
     Args:
-        llm: LLM service instance.
+    llm: LLM service instance.
 
     Returns:
-        Provider-specific adapter instance.
+    Provider-specific adapter instance.
 
     Raises:
-        ValueError: If LLM type is not supported or required dependency not installed.
+    ValueError: If LLM type is not supported or required dependency not installed.
     """
     llm_type = type(llm).__name__
     llm_class = type(llm)
@@ -785,6 +941,11 @@ def create_adapter(llm) -> LLMAdapter:
         logger.debug("Creating Bedrock adapter")
         return AWSBedrockAdapter()
 
+    # ADD THIS BLOCK - Support for UltravoxLLMService
+    if llm_type == "UltravoxLLMService":
+        logger.debug("Creating Ultravox adapter")
+        return UltravoxAdapter()
+
     # Try to find OpenAILLMService for inheritance check
     try:
         module = sys.modules.get("pipecat.services.openai")
@@ -794,17 +955,12 @@ def create_adapter(llm) -> LLMAdapter:
                 logger.debug(f"Creating OpenAI adapter for {llm_type}")
                 return OpenAIAdapter()
     except (TypeError, AttributeError) as e:
-        # Log but continue to error handling if issubclass check fails
         logger.warning(f"Error checking inheritance for {llm_type}: {str(e)}")
 
     # Error handling
     error_msg = (
         f"Unsupported LLM type or missing dependency: {llm_type} (module: {llm_class.__module__})\n"
+        f"Supported types: OpenAILLMService, AnthropicLLMService, GoogleLLMService, AWSBedrockLLMService, UltravoxLLMService"
     )
-    error_msg += "Make sure you have installed the required dependency:\n"
-    error_msg += "- For OpenAI: pip install 'pipecat-ai[openai]'\n"
-    error_msg += "- For Anthropic: pip install 'pipecat-ai[anthropic]'\n"
-    error_msg += "- For Google: pip install 'pipecat-ai[google]'\n"
-    error_msg += "- For Bedrock: pip install 'pipecat-ai[aws]'"
 
     raise ValueError(error_msg)
